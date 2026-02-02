@@ -59,4 +59,7 @@ app.get("/stream/tv/:id.json", requireToken, async (req, res) => {
   res.json({ streams: c ? [{ url: c.url }] : [] });
 });
 
-app.listen(7000, () => console.log("Addon running"));
+const PORT = process.env.PORT || 7000;
+app.listen(PORT, () => console.log("Addon running on port " + PORT));
+
+
