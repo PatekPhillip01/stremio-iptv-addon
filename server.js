@@ -1,28 +1,50 @@
 const express = require("express");
-const fetch = (...args) => import("node-fetch").then(({default: fetch}) => fetch(...args));
+const fetch = (...args) =>
+  import("node-fetch").then(({ default: fetch }) => fetch(...args));
 
 const app = express();
 
-// 👇 CORS obligatorio para Stremio
+/* ===============================
+   CONFIG
+================================ */
+const M3U_URL = process.env.M3U_URL;
+const TOKEN = process.env.ADDON_TOKEN;
+const PORT = process.env.PORT || 7000;
+
+/* ===============================
+   CORS (OBLIGATORIO PARA STREMIO)
+================================ */
 app.use((req, res, next) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  if (req.method === "OPTIONS") return res.sendStatus(204);
   next();
 });
 
-const M3U_URL = process.env.M3U_URL;
-const TOKEN = process.env.ADDON_TOKEN;
-
-let cache = { time: 0, channels: [] };
-
+/* ===============================
+   SIMPLE AUTH
+================================ */
 function requireToken(req, res, next) {
-  if (req.query.token !== TOKEN) return res.status(401).send("Unauthorized");
+  if (req.query.token !== TOKEN) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
   next();
 }
 
+/* ===============================
+   M3U CACHE
+================================ */
+let cache = {
+  time: 0,
+  channels: [],
+};
+
 async function loadM3U() {
-  if (Date.now() - cache.time < 600000) return cache.channels;
+  // Cache 10 minutos
+  if (Date.now() - cache.time < 10 * 60 * 1000) {
+    return cache.channels;
+  }
 
   const res = await fetch(M3U_URL);
   const text = await res.text();
@@ -31,12 +53,15 @@ async function loadM3U() {
   const channels = [];
   let current = null;
 
-  for (const l of lines) {
-    if (l.startsWith("#EXTINF")) {
-      const name = l.split(",").pop().trim();
-      current = { id: name.toLowerCase().replace(/\s+/g, "-"), name };
-    } else if (l.startsWith("http") && current) {
-      current.url = l.trim();
+  for (const line of lines) {
+    if (line.startsWith("#EXTINF")) {
+      const name = line.split(",").pop().trim();
+      current = {
+        id: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        name,
+      };
+    } else if (line.startsWith("http") && current) {
+      current.url = line.trim();
       channels.push(current);
       current = null;
     }
@@ -46,30 +71,54 @@ async function loadM3U() {
   return channels;
 }
 
+/* ===============================
+   STREMIO ROUTES
+================================ */
+
+// Manifest
 app.get("/manifest.json", requireToken, (req, res) => {
   res.json({
     id: "leo.iptv",
     version: "1.0",
     name: "Leo IPTV",
+    description: "Personal IPTV Addon",
     resources: ["catalog", "stream"],
     types: ["tv"],
-    catalogs: [{ type: "tv", id: "channels", name: "Channels" }]
+    catalogs: [
+      {
+        type: "tv",
+        id: "channels",
+        name: "Channels",
+      },
+    ],
   });
 });
 
+// Catalog
 app.get("/catalog/tv/channels.json", requireToken, async (req, res) => {
-  const ch = await loadM3U();
-  res.json({ metas: ch.map(c => ({ id: c.id, type: "tv", name: c.name })) });
+  const channels = await loadM3U();
+  res.json({
+    metas: channels.map((c) => ({
+      id: c.id,
+      type: "tv",
+      name: c.name,
+    })),
+  });
 });
 
+// Stream
 app.get("/stream/tv/:id.json", requireToken, async (req, res) => {
-  const ch = await loadM3U();
-  const c = ch.find(x => x.id === req.params.id);
-  res.json({ streams: c ? [{ url: c.url }] : [] });
+  const channels = await loadM3U();
+  const channel = channels.find((c) => c.id === req.params.id);
+
+  res.json({
+    streams: channel ? [{ url: channel.url }] : [],
+  });
 });
 
-const PORT = process.env.PORT || 7000;
-app.listen(PORT, () => console.log("Addon running on port " + PORT));
-
-
-
+/* ===============================
+   START SERVER
+================================ */
+app.listen(PORT, () => {
+  console.log(`Addon running on port ${PORT}`);
+});
