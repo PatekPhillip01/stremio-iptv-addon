@@ -2,6 +2,15 @@ const express = require("express");
 const fetch = (...args) => import("node-fetch").then(({default: fetch}) => fetch(...args));
 
 const app = express();
+
+// 👇 CORS obligatorio para Stremio
+app.use((req, res, next) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  next();
+});
+
 const M3U_URL = process.env.M3U_URL;
 const TOKEN = process.env.ADDON_TOKEN;
 
@@ -61,5 +70,6 @@ app.get("/stream/tv/:id.json", requireToken, async (req, res) => {
 
 const PORT = process.env.PORT || 7000;
 app.listen(PORT, () => console.log("Addon running on port " + PORT));
+
 
 
